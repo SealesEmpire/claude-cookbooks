@@ -1,0 +1,48 @@
+# Gold set for the notebook's national-parks coverage question.
+#
+# `expected` substrings must all appear near the entity mention in the
+# answer; `source_domain` must appear near it too (the citation check).
+# Fees and reservation policies change: update `expected` values when
+# nps.gov does. The point of the harness is the shape of the check, and
+# that both A/B arms are graded by the same standard.
+question: >
+  For each of the ten largest national parks in the contiguous United
+  States by area, find: the current standard private-vehicle entrance
+  fee, and whether the park currently requires a timed-entry or day-use
+  reservation for peak season. Each fact must be verified against that
+  park's official nps.gov pages (fees page and alerts/reservations
+  page) - not from third-party summaries. Give park, fee, reservation
+  requirement, and the nps.gov URLs you used.
+facts:
+  - entity: Death Valley
+    expected: ["$30"]
+    source_domain: nps.gov
+  - entity: Yellowstone
+    expected: ["$35"]
+    source_domain: nps.gov
+  - entity: Everglades
+    expected: ["$35"]
+    source_domain: nps.gov
+  - entity: Grand Canyon
+    expected: ["$35"]
+    source_domain: nps.gov
+  - entity: Glacier
+    expected: ["$35"]
+    source_domain: nps.gov
+  - entity: Olympic
+    expected: ["$30"]
+    source_domain: nps.gov
+  - entity: Big Bend
+    expected: ["$30"]
+    source_domain: nps.gov
+  - entity: Joshua Tree
+    expected: ["$30"]
+    source_domain: nps.gov
+  - entity: Yosemite
+    expected: ["$35"]
+    source_domain: nps.gov
+  - entity: Great Smoky Mountains
+    # The premise-checker exists for exactly this row: the notebook run
+    # that trusted model memory put Kings Canyon here by mistake.
+    expected: []
+    source_domain: nps.gov
