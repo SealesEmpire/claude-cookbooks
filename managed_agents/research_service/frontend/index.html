@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>research service</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: ui-monospace, monospace; background: #14141a; color: #e8e8ee; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
+  h1 { font-size: 1.1rem; }
+  form { display: flex; gap: .5rem; margin-bottom: 1rem; }
+  textarea { flex: 1; background: #1e1e26; color: inherit; border: 1px solid #34343f; border-radius: 6px; padding: .5rem; min-height: 4rem; }
+  button { background: #d9781e; color: #14141a; border: 0; border-radius: 6px; padding: .5rem 1rem; font-weight: 700; cursor: pointer; align-self: flex-end; }
+  #cost { font-size: .9rem; color: #f4c07a; margin: .5rem 0; }
+  .graph { display: grid; grid-template-columns: 1fr 2fr; gap: 1rem; }
+  .card { background: #1e1e26; border: 1px solid #34343f; border-radius: 6px; padding: .75rem; margin-bottom: .75rem; }
+  .card h2 { font-size: .85rem; margin: 0 0 .5rem; color: #9a9ab0; text-transform: uppercase; letter-spacing: .06em; }
+  .worker { border-left: 3px solid #d9781e; padding-left: .5rem; margin: .35rem 0; font-size: .85rem; }
+  .worker .status { color: #9a9ab0; }
+  .finding { border-left: 3px solid #4fa36c; padding-left: .5rem; margin: .5rem 0; font-size: .85rem; white-space: pre-wrap; }
+  .finding a { color: #7ab8f4; word-break: break-all; display: block; }
+  #answer { white-space: pre-wrap; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>research service — coordinator pattern, live</h1>
+<form id="ask">
+  <textarea id="question" placeholder="Ask a coverage question..."></textarea>
+  <button type="submit">run</button>
+</form>
+<div id="cost"></div>
+<div class="graph">
+  <div>
+    <div class="card"><h2>delegation graph</h2><div id="workers"></div></div>
+  </div>
+  <div>
+    <div class="card"><h2>findings (with sources)</h2><div id="findings"></div></div>
+    <div class="card"><h2>final answer</h2><div id="answer"></div></div>
+  </div>
+</div>
+<script>
+const workers = new Map();
+
+function renderWorkers() {
+  document.getElementById("workers").innerHTML = [...workers.entries()].map(
+    ([id, w]) => `<div class="worker"><b>${esc(w.agent)}</b> <span class="status">${esc(w.status)}</span><br>${esc(w.brief)}</div>`
+  ).join("");
+}
+
+function esc(s) {
+  return (s || "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+
+function addFinding(agent, text) {
+  const urls = (text.match(/https?:\/\/[^\s\)\]>"']+/g) || []);
+  const div = document.createElement("div");
+  div.className = "finding";
+  div.textContent = `[${agent}] ${text.slice(0, 400)}`;
+  for (const u of urls.slice(0, 5)) {
+    const a = document.createElement("a");
+    a.href = u; a.textContent = u; a.target = "_blank"; a.rel = "noopener";
+    div.appendChild(a);
+  }
+  document.getElementById("findings").appendChild(div);
+}
+
+function handle(ev) {
+  const e = JSON.parse(ev.data);
+  switch (e.kind) {
+    case "worker_spawned":
+      workers.set(e.thread_id || e.agent + workers.size, {agent: e.agent, status: "spawned", brief: ""});
+      renderWorkers();
+      break;
+    case "brief_sent": {
+      const w = [...workers.values()].find(w => w.agent === e.agent && !w.brief);
+      if (w) { w.brief = e.text.slice(0, 160); w.status = "reading"; }
+      renderWorkers();
+      break;
+    }
+    case "findings_received": {
+      const w = [...workers.values()].find(w => w.agent === e.agent && w.status === "reading");
+      if (w) w.status = "reported";
+      renderWorkers();
+      addFinding(e.agent, e.text);
+      break;
+    }
+    case "coordinator_message":
+      document.getElementById("answer").textContent = e.text;
+      break;
+    case "budget_status":
+      document.getElementById("cost").textContent = "running cost: " + e.text;
+      break;
+    case "run_aborted":
+    case "error":
+      document.getElementById("cost").textContent = "⛔ " + e.text;
+      break;
+    case "run_state":
+      if (e.state.cost_report && e.state.cost_report.total_usd != null)
+        document.getElementById("cost").textContent =
+          `final cost: $${e.state.cost_report.total_usd} (status: ${e.state.status})`;
+      break;
+  }
+}
+
+document.getElementById("ask").addEventListener("submit", async (evt) => {
+  evt.preventDefault();
+  workers.clear(); renderWorkers();
+  document.getElementById("findings").innerHTML = "";
+  document.getElementById("answer").textContent = "";
+  const question = document.getElementById("question").value;
+  const res = await fetch("/runs", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({question}),
+  });
+  const {run_id} = await res.json();
+  const source = new EventSource(`/runs/${run_id}/stream`);
+  source.onmessage = handle;
+  source.onerror = () => source.close();
+});
+</script>
+</body>
+</html>
