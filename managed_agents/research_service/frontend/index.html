@@ -39,6 +39,8 @@
 </div>
 <script>
 const workers = new Map();
+let source = null;
+let done = false;
 
 function renderWorkers() {
   document.getElementById("workers").innerHTML = [...workers.entries()].map(
@@ -61,6 +63,20 @@ function addFinding(agent, text) {
     div.appendChild(a);
   }
   document.getElementById("findings").appendChild(div);
+}
+
+function renderState(state) {
+  // Replay persisted findings and answer, so a refreshed or reconnected
+  // browser doesn't show a blank panel until the next live event.
+  document.getElementById("findings").innerHTML = "";
+  for (const f of state.findings || []) addFinding(f.agent, f.text);
+  if (state.final_answer) document.getElementById("answer").textContent = state.final_answer;
+  if (state.cost_report && state.cost_report.total_usd != null)
+    document.getElementById("cost").textContent =
+      `final cost: $${state.cost_report.total_usd} (status: ${state.status})`;
+  else if (state.error)
+    document.getElementById("cost").textContent = `⛔ ${state.error} (status: ${state.status})`;
+  if (["finished", "aborted", "failed"].includes(state.status)) done = true;
 }
 
 function handle(ev) {
@@ -90,32 +106,53 @@ function handle(ev) {
       document.getElementById("cost").textContent = "running cost: " + e.text;
       break;
     case "run_aborted":
+      done = true;
+      document.getElementById("cost").textContent = "⛔ " + e.text;
+      break;
     case "error":
       document.getElementById("cost").textContent = "⛔ " + e.text;
       break;
     case "run_state":
-      if (e.state.cost_report && e.state.cost_report.total_usd != null)
-        document.getElementById("cost").textContent =
-          `final cost: $${e.state.cost_report.total_usd} (status: ${e.state.status})`;
+      renderState(e.state);
       break;
   }
+}
+
+async function watch(runId) {
+  if (source) source.close();
+  // Render persisted state first, then subscribe for new events.
+  try {
+    const res = await fetch(`/runs/${runId}`);
+    if (res.ok) renderState(await res.json());
+  } catch (err) { /* server briefly unreachable; the stream retry below covers it */ }
+  if (done) return;
+  source = new EventSource(`/runs/${runId}/stream`);
+  source.onmessage = handle;
+  source.onerror = () => {
+    source.close();
+    if (!done) setTimeout(() => watch(runId), 2000);
+  };
 }
 
 document.getElementById("ask").addEventListener("submit", async (evt) => {
   evt.preventDefault();
   workers.clear(); renderWorkers();
+  done = false;
   document.getElementById("findings").innerHTML = "";
   document.getElementById("answer").textContent = "";
+  document.getElementById("cost").textContent = "";
   const question = document.getElementById("question").value;
   const res = await fetch("/runs", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({question}),
   });
+  if (!res.ok) {
+    document.getElementById("cost").textContent = "⛔ could not start run";
+    return;
+  }
   const {run_id} = await res.json();
-  const source = new EventSource(`/runs/${run_id}/stream`);
-  source.onmessage = handle;
-  source.onerror = () => source.close();
+  watch(run_id);
 });
 </script>
 </body>

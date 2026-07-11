@@ -79,9 +79,12 @@ class FakeClient:
         self.stream_scripts: list[tuple[list, int | None]] = [([], None)]
         self._streams_served = 0
         self.threads: list = []
+        self.archived_environments: list[str] = []
 
         agents = SimpleNamespace(create=self._agents_create)
-        environments = SimpleNamespace(create=self._environments_create)
+        environments = SimpleNamespace(
+            create=self._environments_create, archive=self._environments_archive
+        )
         events = SimpleNamespace(send=self._events_send, stream=self._events_stream)
         threads = SimpleNamespace(list=self._threads_list)
         sessions = SimpleNamespace(create=self._sessions_create, events=events, threads=threads)
@@ -102,6 +105,9 @@ class FakeClient:
 
     def _environments_create(self, **kwargs):
         return SimpleNamespace(id=f"env_{next(self._ids)}", **kwargs)
+
+    def _environments_archive(self, environment_id):
+        self.archived_environments.append(environment_id)
 
     def _sessions_create(self, **kwargs):
         return SimpleNamespace(id=f"session_{next(self._ids)}", **kwargs)

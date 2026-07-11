@@ -8,6 +8,8 @@ be re-composed and prices updated without code changes.
 
 from __future__ import annotations
 
+import datetime as dt
+import logging
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +17,9 @@ from pathlib import Path
 import yaml
 
 DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+PRICING_MAX_AGE_DAYS = 180
+
+logger = logging.getLogger("research_service")
 
 
 class ConfigError(ValueError):
@@ -176,8 +181,31 @@ def load_team(path: str | Path | None = None) -> TeamConfig:
     )
 
 
-def load_pricing(path: str | Path | None = None) -> PricingConfig:
-    """Load and validate the versioned pricing table from YAML."""
+def _warn_if_stale(version: str, path: Path, max_age_days: int) -> None:
+    """Warn when the pricing table's version date has drifted too old."""
+    try:
+        as_of = dt.date.fromisoformat(version)
+    except ValueError:
+        return  # version isn't a date; nothing to check
+    age = (dt.date.today() - as_of).days
+    if age > max_age_days:
+        logger.warning(
+            "pricing table %s is %d days old (version %s); "
+            "check the pricing page and bump `version`",
+            path,
+            age,
+            version,
+        )
+
+
+def load_pricing(
+    path: str | Path | None = None, max_age_days: int = PRICING_MAX_AGE_DAYS
+) -> PricingConfig:
+    """Load and validate the versioned pricing table from YAML.
+
+    Warns when the table's ``version`` date is older than ``max_age_days``,
+    so silently drifting prices get noticed.
+    """
     path = Path(path) if path else DEFAULT_CONFIG_DIR / "pricing.yaml"
     raw = yaml.safe_load(path.read_text())
     if not isinstance(raw, dict):
@@ -197,8 +225,11 @@ def load_pricing(path: str | Path | None = None) -> PricingConfig:
         read=float(m.get("read", 0.1)),
     )
 
+    version = str(_require(raw, "version", str(path)))
+    _warn_if_stale(version, path, max_age_days)
+
     return PricingConfig(
-        version=str(_require(raw, "version", str(path))),
+        version=version,
         models=models,
         cache_multipliers=multipliers,
         source=raw.get("source", ""),

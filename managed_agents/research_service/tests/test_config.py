@@ -70,3 +70,32 @@ def test_malformed_pricing_yaml(tmp_path):
     bad.write_text("models:\n  m:\n    input: 1.0\n")
     with pytest.raises(ConfigError):
         load_pricing(bad)
+
+
+def _pricing_yaml(tmp_path, version: str):
+    path = tmp_path / "pricing.yaml"
+    path.write_text(f"version: '{version}'\nmodels:\n  m:\n    input: 1.0\n    output: 2.0\n")
+    return path
+
+
+def test_stale_pricing_warns(tmp_path, caplog):
+    path = _pricing_yaml(tmp_path, "2020-01-01")
+    with caplog.at_level("WARNING", logger="research_service"):
+        load_pricing(path)
+    assert any("pricing table" in r.message for r in caplog.records)
+
+
+def test_fresh_pricing_does_not_warn(tmp_path, caplog):
+    import datetime as dt
+
+    path = _pricing_yaml(tmp_path, dt.date.today().isoformat())
+    with caplog.at_level("WARNING", logger="research_service"):
+        load_pricing(path)
+    assert not caplog.records
+
+
+def test_non_date_pricing_version_skips_staleness_check(tmp_path, caplog):
+    path = _pricing_yaml(tmp_path, "v3")
+    with caplog.at_level("WARNING", logger="research_service"):
+        load_pricing(path)
+    assert not caplog.records

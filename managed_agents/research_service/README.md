@@ -40,6 +40,21 @@ uv run uvicorn research_service.api:app --reload
 # open http://127.0.0.1:8000 and ask a coverage question
 ```
 
+The service is meant to run locally: it has no authentication, so don't expose it to untrusted networks as-is.
+
+HTTP surface:
+
+| Endpoint | Effect |
+| --- | --- |
+| `POST /runs` | start a run (`question` required, ≤4000 chars; optional `facts`) |
+| `GET /runs` | run history: id, status, question, created_at, total cost |
+| `GET /runs/{id}` | full persisted state of one run |
+| `GET /runs/{id}/stream` | SSE progress stream; safe to open from several tabs — one driver per run fans events out, and terminal runs replay their state |
+| `POST /runs/{id}/cancel` | abort a run and archive its environment |
+| `GET /health` | liveness check |
+
+Each run provisions its own cloud environment; it's archived automatically when the run finishes, aborts, is cancelled, or fails.
+
 Environment knobs:
 
 | Variable | Effect |

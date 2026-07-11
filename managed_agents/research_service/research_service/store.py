@@ -72,7 +72,12 @@ class RunStore:
         return state
 
     def save(self, state: RunState) -> None:
-        self._path(state.run_id).write_text(json.dumps(state.to_dict(), indent=2))
+        # Write-then-rename so a crash mid-write can't leave a corrupt
+        # JSON file that would break load, stream, and resume.
+        path = self._path(state.run_id)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(state.to_dict(), indent=2))
+        tmp.replace(path)
 
     def load(self, run_id: str) -> RunState:
         raw = json.loads(self._path(run_id).read_text())
@@ -81,3 +86,22 @@ class RunStore:
 
     def list_runs(self) -> list[str]:
         return sorted(p.stem for p in self.base_dir.glob("*.json"))
+
+    def summaries(self) -> list[dict]:
+        """One-line summary per run, newest first, for history listings."""
+        out = []
+        for run_id in self.list_runs():
+            try:
+                state = self.load(run_id)
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue  # skip unreadable files rather than break the listing
+            out.append(
+                {
+                    "run_id": state.run_id,
+                    "status": state.status,
+                    "question": state.question,
+                    "created_at": state.created_at,
+                    "total_usd": state.cost_report.get("total_usd"),
+                }
+            )
+        return sorted(out, key=lambda s: s["created_at"], reverse=True)

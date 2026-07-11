@@ -35,7 +35,11 @@ def test_start_and_get_run(fake_client, team_config, pricing_config, run_store):
     assert run["question"] == "Q"
     assert run["status"] == "running"
 
-    assert created["run_id"] in client.get("/runs").json()["runs"]
+    runs = client.get("/runs").json()["runs"]
+    summary = next(r for r in runs if r["run_id"] == created["run_id"])
+    assert summary["status"] == "running"
+    assert summary["question"] == "Q"
+    assert summary["created_at"] > 0
 
 
 def test_unknown_run_404(fake_client, team_config, pricing_config, run_store):
@@ -72,3 +76,57 @@ def test_index_serves_frontend(fake_client, team_config, pricing_config, run_sto
     response = client.get("/")
     assert response.status_code == 200
     assert "delegation graph" in response.text
+
+
+def test_health(fake_client, team_config, pricing_config, run_store):
+    client = make_client(fake_client, team_config, pricing_config, run_store)
+    assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_run_request_validation(fake_client, team_config, pricing_config, run_store):
+    client = make_client(fake_client, team_config, pricing_config, run_store)
+    assert client.post("/runs", json={"question": ""}).status_code == 422
+    assert client.post("/runs", json={"question": "x" * 5000}).status_code == 422
+    assert client.post("/runs", json={"question": "Q", "facts": ["y" * 3000]}).status_code == 422
+
+
+def test_cancel_endpoint(fake_client, team_config, pricing_config, run_store):
+    client = make_client(fake_client, team_config, pricing_config, run_store)
+    run_id = client.post("/runs", json={"question": "Q"}).json()["run_id"]
+
+    cancelled = client.post(f"/runs/{run_id}/cancel").json()
+    assert cancelled["status"] == "aborted"
+    assert client.get(f"/runs/{run_id}").json()["error"] == "cancelled by user"
+    assert client.post("/runs/doesnotexist/cancel").status_code == 404
+
+    # A cancelled run's stream replays the terminal state.
+    payloads = sse_payloads(client.get(f"/runs/{run_id}/stream"))
+    assert [p["kind"] for p in payloads] == ["run_state"]
+    assert payloads[0]["state"]["status"] == "aborted"
+
+
+def test_concurrent_streamers_share_one_driver(fake_client, team_config, pricing_config, run_store):
+    """Two browsers on the same run don't double-record findings."""
+    import threading
+
+    client = make_client(fake_client, team_config, pricing_config, run_store)
+    run_id = client.post("/runs", json={"question": "Q"}).json()["run_id"]
+
+    results: list = [None, None]
+
+    def consume(i: int) -> None:
+        results[i] = sse_payloads(client.get(f"/runs/{run_id}/stream"))
+
+    threads = [threading.Thread(target=consume, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    final = run_store.load(run_id)
+    assert final.status == "finished"
+    assert len(final.findings) == 2  # not doubled by the second consumer
+    for payloads in results:
+        assert payloads is not None
+        assert payloads[-1]["kind"] == "run_state"
+        assert payloads[-1]["state"]["status"] == "finished"

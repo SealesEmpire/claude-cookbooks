@@ -139,3 +139,109 @@ def test_worker_model_resolution(fake_client, team_config, pricing_config, run_s
     unknown_thread = thread("t", "p", usage(), agent_name="mystery")
     assert orchestrator._resolve_worker_model(haiku_thread) == "claude-haiku-4-5"
     assert orchestrator._resolve_worker_model(unknown_thread) == team_config.workers[0].model
+
+
+def test_retry_counter_resets_after_progress(fake_client, team_config, pricing_config, run_store):
+    """Transient drops spread across a long run don't accumulate to failure."""
+    events = successful_run_events()
+    # Three drops, each one further along than the last (new progress
+    # between failures), with max_stream_retries=2: the old always-
+    # incrementing counter would fail, the resetting one recovers.
+    fake_client.script_stream(events, fail_after=2)
+    fake_client.script_stream(events, fail_after=4, reset=False)
+    fake_client.script_stream(events, fail_after=6, reset=False)
+    fake_client.script_stream(events, reset=False)
+    orchestrator = make_orchestrator(
+        fake_client,
+        team_config,
+        pricing_config,
+        run_store,
+        max_stream_retries=2,
+        retry_backoff_s=0.0,
+    )
+    state = orchestrator.run("Q")
+    assert state.status == "finished"
+
+
+def test_reconnect_does_not_duplicate_findings(fake_client, team_config, pricing_config, run_store):
+    """Cumulative event replay after a drop records each finding once."""
+    events = successful_run_events()
+    fake_client.script_stream(events, fail_after=4)  # drops after first finding
+    fake_client.script_stream(events, reset=False)
+    orchestrator = make_orchestrator(
+        fake_client, team_config, pricing_config, run_store, retry_backoff_s=0.0
+    )
+    state = orchestrator.run("Q")
+    assert state.status == "finished"
+    assert len(state.findings) == 2
+
+
+def test_environment_archived_on_finish(fake_client, team_config, pricing_config, run_store):
+    fake_client.script_stream(successful_run_events())
+    orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
+    state = orchestrator.run("Q")
+    assert state.environment_id in fake_client.archived_environments
+
+
+def test_environment_archived_on_failure(fake_client, team_config, pricing_config, run_store):
+    fake_client.script_stream(successful_run_events(), fail_after=1)
+    orchestrator = make_orchestrator(
+        fake_client,
+        team_config,
+        pricing_config,
+        run_store,
+        max_stream_retries=0,
+        retry_backoff_s=0.0,
+    )
+    state = orchestrator.start("Q")
+    with pytest.raises(ConnectionError):
+        list(orchestrator.stream(state.run_id))
+    assert run_store.load(state.run_id).environment_id in fake_client.archived_environments
+
+
+def test_cancel_marks_aborted_and_tears_down(fake_client, team_config, pricing_config, run_store):
+    fake_client.script_stream(successful_run_events())
+    orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
+    state = orchestrator.start("Q")
+
+    cancelled = orchestrator.cancel(state.run_id)
+    assert cancelled.status == "aborted"
+    assert cancelled.error == "cancelled by user"
+    assert cancelled.environment_id in fake_client.archived_environments
+    # A cancelled run streams nothing.
+    assert list(orchestrator.stream(state.run_id)) == []
+    # Cancelling again is a no-op.
+    assert orchestrator.cancel(state.run_id).status == "aborted"
+
+
+def test_cancel_stops_an_active_stream(fake_client, team_config, pricing_config, run_store):
+    fake_client.script_stream(successful_run_events())
+    orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
+    state = orchestrator.start("Q")
+
+    kinds = []
+    for progress in orchestrator.stream(state.run_id):
+        kinds.append(progress.kind)
+        if len(kinds) == 2:
+            orchestrator.cancel(state.run_id)
+    assert kinds[-1] == "run_aborted"
+    assert run_store.load(state.run_id).status == "aborted"
+
+
+def test_time_based_budget_poll(fake_client, team_config, pricing_config, run_store):
+    """The budget guard also fires on wall-clock time, not just event count."""
+    fake_client.script_stream(successful_run_events())
+    fake_client.threads = [
+        thread("t_p", None, usage(input_tokens=10_000, output_tokens=1_000)),
+    ]
+    orchestrator = make_orchestrator(
+        fake_client,
+        team_config,
+        pricing_config,
+        run_store,
+        budget_poll_events=10_000,  # event-count polling effectively off
+        budget_poll_interval_s=0.0,
+    )
+    state = orchestrator.start("Q")
+    kinds = [p.kind for p in orchestrator.stream(state.run_id)]
+    assert "budget_status" in kinds
