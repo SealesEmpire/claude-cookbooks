@@ -5,12 +5,12 @@ import json
 from fastapi.testclient import TestClient
 from research_service.api import create_app
 
-from tests.conftest import happy_path_events, thread, usage
+from tests.conftest import successful_run_events, thread, usage
 from tests.test_orchestration import make_orchestrator
 
 
 def make_client(fake_client, team_config, pricing_config, run_store, **kwargs):
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     fake_client.threads = [
         thread("t_p", None, usage(input_tokens=10_000, output_tokens=1_000)),
     ]

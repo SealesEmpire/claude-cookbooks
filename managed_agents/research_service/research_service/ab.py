@@ -95,7 +95,7 @@ def run_ab(orchestrator: ResearchOrchestrator, question: str) -> ABResult:
         orchestrator.client,
         team_state.session_id,
         primary_model=orchestrator.team.coordinator.model,
-        worker_model_for=orchestrator._worker_model_for,
+        resolve_worker_model=orchestrator._resolve_worker_model,
         default_worker_model=orchestrator.team.workers[0].model,
         pricing=orchestrator.pricing,
         betas=orchestrator.team.betas,

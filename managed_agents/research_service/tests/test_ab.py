@@ -3,7 +3,7 @@
 from research_service.ab import ABResult, ArmResult, run_ab
 from research_service.metering import SessionCostReport, ThreadCost
 
-from tests.conftest import happy_path_events, thread, usage
+from tests.conftest import successful_run_events, thread, usage
 
 
 def _report(total: float) -> SessionCostReport:
@@ -36,7 +36,7 @@ def test_run_ab_end_to_end(fake_client, team_config, pricing_config, run_store):
     # Both arms consume the same scripted stream; the solo arm's events
     # contain no delegation traffic in a real run, but the folding is
     # identical, so one script exercises both paths.
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     fake_client.threads = [
         thread("t_p", None, usage(input_tokens=10_000, output_tokens=1_000)),
         thread(

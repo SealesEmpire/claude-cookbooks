@@ -95,14 +95,14 @@ def session_report(
     client,
     session_id: str,
     primary_model: str,
-    worker_model_for: callable | None = None,
+    resolve_worker_model: callable | None = None,
     default_worker_model: str = "",
     pricing: PricingConfig | None = None,
     betas: tuple[str, ...] = (),
 ) -> SessionCostReport:
     """Price every thread of a session.
 
-    ``worker_model_for(thread) -> model`` resolves a child thread's model
+    ``resolve_worker_model(thread) -> model`` resolves a child thread's model
     (thread objects don't carry the roster spec); when omitted, every
     child bills at ``default_worker_model``.
     """
@@ -113,8 +113,8 @@ def session_report(
         is_primary = t.parent_thread_id is None
         if is_primary:
             model = primary_model
-        elif worker_model_for is not None:
-            model = worker_model_for(t)
+        elif resolve_worker_model is not None:
+            model = resolve_worker_model(t)
         else:
             model = default_worker_model
         costs.append(
@@ -145,7 +145,7 @@ class CostTracker:
     pricing: PricingConfig
     betas: tuple[str, ...] = ()
     budget_usd: float | None = None
-    worker_model_for: object = None
+    resolve_worker_model: object = None
     last_report: SessionCostReport = field(default_factory=lambda: SessionCostReport(threads=()))
 
     def refresh(self) -> SessionCostReport:
@@ -153,7 +153,7 @@ class CostTracker:
             self.client,
             self.session_id,
             primary_model=self.primary_model,
-            worker_model_for=self.worker_model_for,
+            resolve_worker_model=self.resolve_worker_model,
             default_worker_model=self.default_worker_model,
             pricing=self.pricing,
             betas=self.betas,

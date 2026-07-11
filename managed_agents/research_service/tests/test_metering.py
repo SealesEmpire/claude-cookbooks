@@ -55,14 +55,14 @@ def test_session_report_heterogeneous_worker_models(fake_client, pricing_config,
         thread("t_s", "t_p", usage(input_tokens=1_000), agent_name="search-worker"),
     ]
 
-    def worker_model_for(t):
+    def resolve_worker_model(t):
         return team_config.worker(t.agent_name).model
 
     report = session_report(
         fake_client,
         "session_1",
         primary_model=team_config.coordinator.model,
-        worker_model_for=worker_model_for,
+        resolve_worker_model=resolve_worker_model,
         default_worker_model="claude-sonnet-5",
         pricing=pricing_config,
     )

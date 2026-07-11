@@ -57,7 +57,7 @@ class ResearchOrchestrator:
             self._team_ids = provision_team(self.client, self.team)
         return self._team_ids
 
-    def _worker_model_for(self, thread) -> str:
+    def _resolve_worker_model(self, thread) -> str:
         """Resolve a child thread's model from the roster by agent name."""
         name = getattr(thread, "agent_name", None)
         if name:
@@ -117,7 +117,7 @@ class ResearchOrchestrator:
             pricing=self.pricing,
             betas=self.team.betas,
             budget_usd=self.budget_usd,
-            worker_model_for=self._worker_model_for,
+            resolve_worker_model=self._resolve_worker_model,
         )
 
         attempts = 0

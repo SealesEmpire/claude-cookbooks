@@ -139,7 +139,7 @@ def run_store(tmp_path):
     return RunStore(tmp_path / "runs")
 
 
-def happy_path_events(answer: str = "Final synthesized answer.") -> list:
+def successful_run_events(answer: str = "Final synthesized answer.") -> list:
     """The event script of one successful team run."""
     return [
         ev("session.thread_created", agent_name="premise-checker", session_thread_id="th_1"),

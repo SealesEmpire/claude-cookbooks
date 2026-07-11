@@ -4,7 +4,7 @@ import pytest
 from research_service.agents import provision_team, toolset_config
 from research_service.orchestration import BudgetExceededError, ResearchOrchestrator
 
-from tests.conftest import happy_path_events, thread, usage
+from tests.conftest import successful_run_events, thread, usage
 
 
 def make_orchestrator(fake_client, team_config, pricing_config, run_store, **kwargs):
@@ -35,7 +35,7 @@ def test_provision_team_creates_workers_then_coordinator(fake_client, team_confi
 
 
 def test_happy_path_run(fake_client, team_config, pricing_config, run_store):
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     fake_client.threads = [
         thread("t_p", None, usage(input_tokens=50_000, output_tokens=5_000)),
         thread(
@@ -60,7 +60,7 @@ def test_happy_path_run(fake_client, team_config, pricing_config, run_store):
 
 
 def test_facts_become_briefs_in_the_message(fake_client, team_config, pricing_config, run_store):
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
     orchestrator.start("Q", facts=[f"fact {i}" for i in range(6)])
     text = fake_client.sent_events[0]["events"][0]["content"][0]["text"]
@@ -69,7 +69,7 @@ def test_facts_become_briefs_in_the_message(fake_client, team_config, pricing_co
 
 
 def test_budget_abort(fake_client, team_config, pricing_config, run_store):
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     fake_client.threads = [
         thread("t_p", None, usage(input_tokens=2_000_000, output_tokens=200_000)),
     ]
@@ -93,7 +93,7 @@ def test_budget_abort(fake_client, team_config, pricing_config, run_store):
 
 
 def test_stream_retry_recovers(fake_client, team_config, pricing_config, run_store):
-    events = happy_path_events()
+    events = successful_run_events()
     fake_client.script_stream(events, fail_after=2)  # first attempt drops mid-stream
     fake_client.script_stream(events, reset=False)  # reconnect succeeds
     orchestrator = make_orchestrator(
@@ -105,7 +105,7 @@ def test_stream_retry_recovers(fake_client, team_config, pricing_config, run_sto
 
 
 def test_stream_exhausts_retries(fake_client, team_config, pricing_config, run_store):
-    fake_client.script_stream(happy_path_events(), fail_after=1)
+    fake_client.script_stream(successful_run_events(), fail_after=1)
     orchestrator = make_orchestrator(
         fake_client,
         team_config,
@@ -121,7 +121,7 @@ def test_stream_exhausts_retries(fake_client, team_config, pricing_config, run_s
 
 
 def test_resume_by_run_id(fake_client, team_config, pricing_config, run_store):
-    fake_client.script_stream(happy_path_events())
+    fake_client.script_stream(successful_run_events())
     orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
     state = orchestrator.start("Q")
 
@@ -137,5 +137,5 @@ def test_worker_model_resolution(fake_client, team_config, pricing_config, run_s
     orchestrator = make_orchestrator(fake_client, team_config, pricing_config, run_store)
     haiku_thread = thread("t", "p", usage(), agent_name="fetch-extract-worker")
     unknown_thread = thread("t", "p", usage(), agent_name="mystery")
-    assert orchestrator._worker_model_for(haiku_thread) == "claude-haiku-4-5"
-    assert orchestrator._worker_model_for(unknown_thread) == team_config.workers[0].model
+    assert orchestrator._resolve_worker_model(haiku_thread) == "claude-haiku-4-5"
+    assert orchestrator._resolve_worker_model(unknown_thread) == team_config.workers[0].model
